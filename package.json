@@ -1,0 +1,60 @@
+{
+  "name": "pubky-messenger-ts",
+  "version": "0.1.0",
+  "description": "TypeScript library for end-to-end encrypted private messaging over the Pubky network. A faithful port of the pubky-messenger Rust crate, built on @synonymdev/pubky.",
+  "license": "MIT",
+  "author": "Corey Phillips",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "chat": "tsx examples/chat.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run test/unit",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "PUBKY_MESSENGER_LIVE=1 vitest run test/integration",
+    "test:all": "PUBKY_MESSENGER_LIVE=1 vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write ."
+  },
+  "keywords": [
+    "pubky",
+    "messaging",
+    "encryption",
+    "private",
+    "chat",
+    "e2ee"
+  ],
+  "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@scure/bip39": "^2.2.0",
+    "@synonymdev/pubky": "^0.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "prettier": "^3.9.4",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
