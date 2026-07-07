@@ -116,7 +116,7 @@ Reading works from any origin, because public data needs no authentication. Send
 
 To send from a hosted page, serve the app on the same registrable domain as the homeserver (so the session cookie is first-party, which is how pubky.app works), or use a homeserver that sets partitioned (CHIPS) cookies. For local development you can also allow third-party cookies for the page.
 
-## Peer discovery (optional, Node)
+## Peer discovery (optional)
 
 By default you can only chat with someone whose pubky you already have. The optional discovery module lets two people start a conversation without following each other first, using [hyperdht](https://github.com/holepunchto/hyperdht) for a peer-to-peer rendezvous.
 
@@ -147,7 +147,24 @@ npm run discover -- --file test/fixtures/p1.pkarr --passphrase password
 npm run discover -- --file test/fixtures/p2.pkarr --passphrase password --to <p1-pubky> --message "hi"
 ```
 
-Requires the optional `hyperdht` dependency (installed automatically). This module is **Node-only**: browsers cannot open raw UDP sockets, so browser discovery needs a WebSocket DHT relay (`@hyperswarm/dht-relay` / `dht-universal` plus a relay server). Discovery sits behind a `DiscoveryTransport` interface, so a relay-backed transport can be added without touching the messaging core; that browser path is planned.
+Requires the optional `hyperdht` dependency (installed automatically). This transport is Node-only, since browsers cannot open raw UDP sockets.
+
+### In the browser (iroh, no server)
+
+For the browser, discovery uses [iroh](https://github.com/n0-computer/iroh). An iroh endpoint is keyed by an ed25519 key, which is exactly a pubky, so a peer listens under its own pubky; iroh discovers peers via pkarr (pubky's own layer) and relays through n0's free public relay servers, so it works in the browser with **no server of our own**. The web demo uses it: after you sign in it starts listening, incoming chat requests appear above the conversation, and the Knock button reaches a peer by pubky.
+
+```ts
+import { IrohDiscovery } from './discovery/iroh.js';
+
+const discovery = new IrohDiscovery(keypair);
+discovery.onChatRequest(async ({ from, message }) => {
+  await client.putFollow(from.z32()); // accept, then DM as usual
+});
+await discovery.start();
+await discovery.requestChat(peerPublicKey, 'hi'); // reach a peer by pubky
+```
+
+The iroh transport is a ~2.4MB WebAssembly module compiled from the `iroh-discovery` Rust crate. The built artifact is committed under `src/discovery/iroh-wasm/`, so building the app needs no Rust toolchain; see `iroh-discovery/README.md` to rebuild it. One characteristic: iroh publishes its address to n0's discovery when it starts, so the first request to a freshly started peer can take a few seconds to resolve.
 
 ## API
 

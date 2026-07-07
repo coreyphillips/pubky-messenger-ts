@@ -2,7 +2,14 @@
 //
 // In a real app you would `import { PrivateMessengerClient } from 'pubky-messenger-ts'`.
 // Here we import the local source directly so the example builds inside this repo.
-import { PrivateMessengerClient, PublicKey, type DecryptedMessage } from '../../src/index.js';
+import {
+  PrivateMessengerClient,
+  PublicKey,
+  Keypair,
+  keypairFromRecoveryPhrase,
+  type DecryptedMessage,
+} from '../../src/index.js';
+import { IrohDiscovery } from '../../src/discovery/iroh.js';
 
 // Public keys of the bundled test identities (test/fixtures/p1.pkarr, p2.pkarr).
 const ALICE = 'w5ux3c55ujxq7rpb6x9z9wo554s4eb4zeuh1933b94zk7qsfxd1o';
@@ -34,6 +41,8 @@ const ui = {
   composer: need<HTMLFormElement>('#composer'),
   text: need<HTMLInputElement>('#text'),
   status: need('#status'),
+  requests: need('#requests'),
+  knock: need<HTMLButtonElement>('#knock'),
 };
 
 let method: 'phrase' | 'file' = 'phrase';
@@ -44,6 +53,7 @@ let ownPubky = '';
 let messages: DecryptedMessage[] = [];
 const seen = new Set<string>();
 let pollTimer: number | undefined;
+let discovery: IrohDiscovery | null = null;
 
 const keyOf = (m: DecryptedMessage): string => `${m.timestamp}:${m.sender}:${m.content}`;
 const shorten = (s: string): string => (s.length > 14 ? `${s.slice(0, 8)}...${s.slice(-4)}` : s);
@@ -76,6 +86,7 @@ ui.file.addEventListener('change', async () => {
 
 ui.connect.addEventListener('click', () => void connect());
 ui.disconnect.addEventListener('click', disconnect);
+ui.knock.addEventListener('click', () => void knock());
 ui.composer.addEventListener('submit', (e) => {
   e.preventDefault();
   void send();
@@ -94,10 +105,9 @@ async function loadDemo(who: 'alice' | 'bob'): Promise<void> {
     const response = await fetch(`./${fixture}`);
     if (!response.ok) throw new Error(`could not load ${fixture}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    // Build the demo client directly; do not touch the manual form state.
-    const demoClient = PrivateMessengerClient.fromRecoveryFile(bytes, 'password');
+    const kp = Keypair.fromRecoveryFile(bytes, 'password');
     const peerKey = PublicKey.from(who === 'alice' ? BOB : ALICE);
-    await connectClient(demoClient, peerKey);
+    await connectClient(kp, new PrivateMessengerClient(kp), peerKey);
   } catch (e) {
     setStatus(`Could not load demo identity: ${errorText(e)}`, 'error');
   }
@@ -109,20 +119,10 @@ async function connect(): Promise<void> {
   ui.connect.disabled = true;
   try {
     setStatus('Deriving your keys...');
-    const passphrase = ui.passphrase.value;
-    let newClient: PrivateMessengerClient;
-    if (method === 'phrase') {
-      const phrase = ui.phrase.value.trim();
-      if (!phrase) throw new Error('Enter your recovery phrase.');
-      newClient = PrivateMessengerClient.fromRecoveryPhrase(phrase, passphrase);
-    } else {
-      if (!fileBytes) throw new Error('Choose a .pkarr recovery file first.');
-      newClient = PrivateMessengerClient.fromRecoveryFile(fileBytes, passphrase);
-    }
-
+    const kp = buildKeypair();
     const peerValue = ui.peer.value.trim();
     if (!peerValue) throw new Error('Enter a peer public key.');
-    await connectClient(newClient, PublicKey.from(peerValue));
+    await connectClient(kp, new PrivateMessengerClient(kp), PublicKey.from(peerValue));
   } catch (e) {
     setStatus(errorText(e), 'error');
   } finally {
@@ -130,8 +130,27 @@ async function connect(): Promise<void> {
   }
 }
 
+function buildKeypair(): Keypair {
+  const passphrase = ui.passphrase.value;
+  if (method === 'phrase') {
+    const phrase = ui.phrase.value.trim();
+    if (!phrase) throw new Error('Enter your recovery phrase.');
+    return keypairFromRecoveryPhrase(phrase, passphrase);
+  }
+  if (!fileBytes) throw new Error('Choose a .pkarr recovery file first.');
+  try {
+    return Keypair.fromRecoveryFile(fileBytes, passphrase);
+  } catch {
+    throw new Error('Could not decrypt the recovery file: wrong passphrase or corrupt file.');
+  }
+}
+
 // Shared sign-in + switch-to-chat logic for both the demo and the manual form.
-async function connectClient(newClient: PrivateMessengerClient, peerKey: PublicKey): Promise<void> {
+async function connectClient(
+  kp: Keypair,
+  newClient: PrivateMessengerClient,
+  peerKey: PublicKey,
+): Promise<void> {
   setStatus('Signing in to the homeserver...');
   await newClient.signIn(); // throws here on failure; module state stays untouched
 
@@ -146,6 +165,8 @@ async function connectClient(newClient: PrivateMessengerClient, peerKey: PublicK
   messages = [];
   seen.clear();
   ui.messages.replaceChildren();
+  ui.requests.replaceChildren();
+  ui.requests.hidden = true;
   ui.setup.hidden = true;
   ui.chat.hidden = false;
   ui.disconnect.hidden = false;
@@ -155,6 +176,68 @@ async function connectClient(newClient: PrivateMessengerClient, peerKey: PublicK
   startPolling();
   setStatus(`Connected. ${messages.length} message(s) in this conversation.`);
   ui.text.focus();
+
+  void startDiscovery(kp);
+}
+
+// --- discovery (iroh, browser P2P, no server) ---
+
+async function startDiscovery(kp: Keypair): Promise<void> {
+  try {
+    discovery = new IrohDiscovery(kp);
+    discovery.onChatRequest((request) => addIncomingRequest(request.from, request.message));
+    await discovery.start();
+  } catch (e) {
+    // Discovery is optional; a failure must not break chatting.
+    console.warn('discovery unavailable:', errorText(e));
+  }
+}
+
+function addIncomingRequest(from: PublicKey, message?: string): void {
+  const who = from.z32();
+  ui.requests.hidden = false;
+  const card = document.createElement('div');
+  card.className = 'request';
+  const label = document.createElement('span');
+  label.textContent = `${shorten(who)} wants to chat${message ? `: "${message}"` : ''}`;
+  const open = document.createElement('button');
+  open.className = 'link';
+  open.textContent = 'Open chat';
+  open.addEventListener('click', () => {
+    card.remove();
+    void openConversationWith(from);
+  });
+  card.append(label, open);
+  ui.requests.prepend(card);
+}
+
+async function openConversationWith(from: PublicKey): Promise<void> {
+  if (!client) return;
+  peer = from;
+  ui.them.textContent = shorten(from.z32());
+  ui.them.title = from.z32();
+  messages = [];
+  seen.clear();
+  ui.messages.replaceChildren();
+  try {
+    await client.putFollow(from.z32());
+  } catch {
+    /* ignore follow errors */
+  }
+  setStatus('Loading conversation...');
+  await refresh();
+  setStatus(`Now chatting with ${shorten(from.z32())}.`);
+}
+
+async function knock(): Promise<void> {
+  if (!discovery || !peer) return;
+  try {
+    setStatus('Sending a chat request over the DHT...');
+    await discovery.requestChat(peer, 'wants to chat');
+    setStatus('Chat request sent. They will see it while they are online.');
+  } catch (e) {
+    setStatus(`Chat request failed: ${errorText(e)}`, 'error');
+  }
 }
 
 async function refresh(): Promise<void> {
@@ -251,6 +334,8 @@ function stopPolling(): void {
 
 function disconnect(): void {
   stopPolling();
+  discovery?.destroy();
+  discovery = null;
   client = null;
   peer = null;
   ownPubky = '';
@@ -258,6 +343,8 @@ function disconnect(): void {
   seen.clear();
   fileBytes = null;
   ui.messages.replaceChildren();
+  ui.requests.replaceChildren();
+  ui.requests.hidden = true;
   // Clear sensitive inputs and reset the form to a known-good default.
   ui.phrase.value = '';
   ui.passphrase.value = '';
