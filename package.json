@@ -13,6 +13,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./discovery": {
+      "types": "./dist/discovery.d.ts",
+      "import": "./dist/discovery.js",
+      "require": "./dist/discovery.cjs"
     }
   },
   "files": [
@@ -26,6 +31,7 @@
   "scripts": {
     "build": "tsup",
     "chat": "tsx examples/chat.ts",
+    "discover": "tsx examples/discover.ts",
     "web:dev": "vite",
     "web:build": "vite build",
     "web:preview": "vite preview",
@@ -51,6 +57,9 @@
     "@noble/hashes": "^2.2.0",
     "@scure/bip39": "^2.2.0",
     "@synonymdev/pubky": "^0.9.3"
+  },
+  "optionalDependencies": {
+    "hyperdht": "^6.32.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

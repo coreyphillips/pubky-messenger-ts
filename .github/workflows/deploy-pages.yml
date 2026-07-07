@@ -25,7 +25,9 @@ jobs:
           cache: npm
       # `npm install` (not `npm ci`) so platform-specific optional deps that npm
       # may prune from the lockfile on one OS are reconciled on the CI runner.
-      - run: npm install --no-audit --no-fund
+      # `--omit=optional` skips the Node-only discovery dependency (hyperdht),
+      # which the web build does not use.
+      - run: npm install --no-audit --no-fund --omit=optional
       - run: npm run web:build
       - uses: actions/upload-pages-artifact@v3
         with:
