@@ -94,6 +94,22 @@ npm run chat -- --file test/fixtures/p1.pkarr --passphrase password \
   --peer ssffc7wiswjzdtt7nw93fa9wy9bus34puyy39giityofcibh9qny
 ```
 
+## Web demo (runs in the browser)
+
+`examples/web/` is a static single-page chat app built with Vite. It runs the library entirely in the browser: the `@synonymdev/pubky` WASM client resolves homeservers through public pkarr relays and talks to them over HTTPS, so there is no backend to run. It can be hosted on GitHub Pages as-is.
+
+```sh
+npm run web:dev       # dev server with hot reload
+npm run web:build     # static build into dist-web/
+npm run web:preview   # preview the built site
+```
+
+Load an identity from a recovery phrase or a `.pkarr` file (or click one of the bundled test identities), enter a peer public key, and chat. Keys are derived locally in your browser and are never uploaded.
+
+### Hosting on GitHub Pages
+
+The workflow at `.github/workflows/deploy-pages.yml` builds `examples/web/` and deploys it on every push to `main`. Enable it once in the repository under Settings, Pages, by setting the source to GitHub Actions. The site is then served at `https://<user>.github.io/pubky-messenger-ts/`.
+
 ## API
 
 ### `PrivateMessengerClient`
