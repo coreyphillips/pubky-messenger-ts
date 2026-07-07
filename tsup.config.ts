@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: { index: 'src/index.ts', discovery: 'src/discovery/index.ts' },
   format: ['esm', 'cjs'],
   dts: true,
   sourcemap: true,
@@ -14,6 +14,7 @@ export default defineConfig({
     '@noble/hashes',
     '@noble/ciphers',
     '@scure/bip39',
+    'hyperdht',
   ],
   outExtension({ format }) {
     return { js: format === 'cjs' ? '.cjs' : '.js' };

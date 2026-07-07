@@ -116,6 +116,39 @@ Reading works from any origin, because public data needs no authentication. Send
 
 To send from a hosted page, serve the app on the same registrable domain as the homeserver (so the session cookie is first-party, which is how pubky.app works), or use a homeserver that sets partitioned (CHIPS) cookies. For local development you can also allow third-party cookies for the page.
 
+## Peer discovery (optional, Node)
+
+By default you can only chat with someone whose pubky you already have. The optional discovery module lets two people start a conversation without following each other first, using [hyperdht](https://github.com/holepunchto/hyperdht) for a peer-to-peer rendezvous.
+
+A pubky is an Ed25519 keypair, and so is a hyperdht node, so a peer listens on the DHT under its own pubky. To reach someone you connect to their pubky, and hyperdht's Noise handshake authenticates both identities end to end, so a chat request cannot be spoofed.
+
+```ts
+import { Keypair, PrivateMessengerClient } from 'pubky-messenger-ts';
+import { createNodeDiscovery } from 'pubky-messenger-ts/discovery';
+
+const keypair = Keypair.fromRecoveryFile(bytes, 'passphrase');
+const client = new PrivateMessengerClient(keypair);
+await client.signIn();
+
+const discovery = createNodeDiscovery(keypair);
+discovery.onChatRequest(async ({ from, message }) => {
+  await client.putFollow(from.z32()); // accept: follow them, then DM as usual
+});
+await discovery.start();
+
+// Reach out to someone by their pubky:
+await discovery.requestChat(peerPublicKey, 'Hi, let us chat');
+```
+
+Try it with the CLI example and the bundled identities, in two terminals (use each side's printed pubky):
+
+```sh
+npm run discover -- --file test/fixtures/p1.pkarr --passphrase password
+npm run discover -- --file test/fixtures/p2.pkarr --passphrase password --to <p1-pubky> --message "hi"
+```
+
+Requires the optional `hyperdht` dependency (installed automatically). This module is **Node-only**: browsers cannot open raw UDP sockets, so browser discovery needs a WebSocket DHT relay (`@hyperswarm/dht-relay` / `dht-universal` plus a relay server). Discovery sits behind a `DiscoveryTransport` interface, so a relay-backed transport can be added without touching the messaging core; that browser path is planned.
+
 ## API
 
 ### `PrivateMessengerClient`
