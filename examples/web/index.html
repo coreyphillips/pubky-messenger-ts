@@ -72,9 +72,18 @@
           <div><span class="muted">You</span> <code id="me"></code></div>
           <div><span class="muted">Peer</span> <code id="them"></code></div>
         </div>
+        <div id="requests" class="requests" hidden></div>
         <div id="messages" class="messages" aria-live="polite"></div>
         <form id="composer" class="composer">
           <input id="text" type="text" placeholder="Type a message" autocomplete="off" />
+          <button
+            id="knock"
+            class="ghost"
+            type="button"
+            title="Notify this peer over the DHT that you want to chat"
+          >
+            Knock
+          </button>
           <button class="primary" type="submit">Send</button>
         </form>
       </section>

@@ -1,8 +1,5 @@
-node_modules/
 dist/
 dist-web/
+src/discovery/iroh-wasm/
 iroh-discovery/target/
 iroh-discovery/pkg/
-*.log
-.DS_Store
-.idea/

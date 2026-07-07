@@ -31,6 +31,23 @@ const asPath = (p: string): Path => p as Path;
 const asAddress = (a: string): Address => a as Address;
 
 /**
+ * Derive a keypair from a 12-word BIP39 recovery phrase (first 32 bytes of the
+ * seed, no derivation path), matching the Rust implementation.
+ */
+export function keypairFromRecoveryPhrase(
+  mnemonicPhrase: string,
+  passphrase = '',
+  wordlist: Wordlist = englishWordlist,
+): Keypair {
+  const normalized = mnemonicPhrase.trim().replace(/\s+/g, ' ');
+  if (!validateMnemonic(normalized, wordlist)) {
+    throw new Error('Invalid mnemonic phrase');
+  }
+  const seed = mnemonicToSeedSync(normalized, passphrase);
+  return Keypair.fromSecret(seed.slice(0, 32));
+}
+
+/**
  * Client for end-to-end encrypted private messaging over the Pubky network.
  *
  * A faithful TypeScript port of the Rust `PrivateMessengerClient`. Writes and
@@ -79,13 +96,9 @@ export class PrivateMessengerClient {
     passphrase = '',
     wordlist: Wordlist = englishWordlist,
   ): PrivateMessengerClient {
-    const normalized = mnemonicPhrase.trim().replace(/\s+/g, ' ');
-    if (!validateMnemonic(normalized, wordlist)) {
-      throw new Error('Invalid mnemonic phrase');
-    }
-    const seed = mnemonicToSeedSync(normalized, passphrase);
-    const keypair = Keypair.fromSecret(seed.slice(0, 32));
-    return new PrivateMessengerClient(keypair);
+    return new PrivateMessengerClient(
+      keypairFromRecoveryPhrase(mnemonicPhrase, passphrase, wordlist),
+    );
   }
 
   /** Sign in to the homeserver. Required before sending or deleting. */

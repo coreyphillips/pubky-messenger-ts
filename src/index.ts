@@ -5,7 +5,7 @@
  * port of the Rust `pubky-messenger` crate, built on `@synonymdev/pubky`.
  */
 
-export { PrivateMessengerClient } from './client.js';
+export { PrivateMessengerClient, keypairFromRecoveryPhrase } from './client.js';
 export type { PubkyProfile, FollowedUser, Wordlist } from './client.js';
 
 export { PrivateMessage } from './message.js';
