@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pubky Messenger (web demo)</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="topbar">
+        <h1>Pubky Messenger</h1>
+        <span class="tag">web demo</span>
+        <button id="disconnect" class="ghost" hidden>Disconnect</button>
+      </header>
+
+      <section id="setup" class="card">
+        <p class="lede">
+          End-to-end encrypted private messaging over the Pubky network, running entirely in your
+          browser.
+        </p>
+
+        <div class="notice">
+          <strong>This is a demo.</strong> Use a throwaway identity. Your recovery phrase or file is
+          processed locally in your browser to derive your keys; it is never uploaded. Do not paste
+          a recovery phrase that protects anything valuable.
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-method="phrase" type="button">Recovery phrase</button>
+          <button class="tab" data-method="file" type="button">Recovery file</button>
+        </div>
+
+        <div id="pane-phrase" class="pane">
+          <label>
+            12-word recovery phrase
+            <textarea id="phrase" rows="3" placeholder="word word word ... about"></textarea>
+          </label>
+        </div>
+
+        <div id="pane-file" class="pane" hidden>
+          <label>
+            Recovery file (.pkarr)
+            <input id="file" type="file" accept=".pkarr" />
+          </label>
+        </div>
+
+        <label>
+          Passphrase
+          <input id="passphrase" type="password" placeholder="passphrase (leave blank if none)" />
+        </label>
+
+        <label>
+          Peer public key
+          <input id="peer" type="text" placeholder="pk:... or pubky://... or z32" />
+        </label>
+
+        <button id="connect" class="primary" type="button">Connect</button>
+
+        <div class="try">
+          <span class="muted">Try it with the bundled test identities:</span>
+          <div class="try-row">
+            <button class="link" data-demo="alice" type="button">Chat as Alice to Bob</button>
+            <button class="link" data-demo="bob" type="button">Chat as Bob to Alice</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="chat" class="card" hidden>
+        <div class="who">
+          <div><span class="muted">You</span> <code id="me"></code></div>
+          <div><span class="muted">Peer</span> <code id="them"></code></div>
+        </div>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <input id="text" type="text" placeholder="Type a message" autocomplete="off" />
+          <button class="primary" type="submit">Send</button>
+        </form>
+      </section>
+
+      <div id="status" class="status" role="status"></div>
+
+      <footer class="foot">
+        Built with
+        <a href="https://github.com/coreyphillips/pubky-messenger-ts">pubky-messenger-ts</a>.
+      </footer>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
