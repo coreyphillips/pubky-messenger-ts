@@ -225,7 +225,15 @@ async function send(): Promise<void> {
     ]);
   } catch (e) {
     ui.text.value = text;
-    setStatus(`Send failed: ${errorText(e)}`, 'error');
+    const detail = errorText(e);
+    if (/session|cookie|401|unauthor/i.test(detail)) {
+      setStatus(
+        'Send failed: your browser is blocking the homeserver session cookie because this page and the homeserver are on different sites. Reading works, but sending needs same-origin hosting or third-party cookies enabled (see the README).',
+        'error',
+      );
+    } else {
+      setStatus(`Send failed: ${detail}`, 'error');
+    }
   }
 }
 

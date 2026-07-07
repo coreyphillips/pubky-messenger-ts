@@ -110,6 +110,12 @@ Load an identity from a recovery phrase or a `.pkarr` file (or click one of the 
 
 The workflow at `.github/workflows/deploy-pages.yml` builds `examples/web/` and deploys it on every push to `main`. Enable it once in the repository under Settings, Pages, by setting the source to GitHub Actions. The site is then served at `https://<user>.github.io/pubky-messenger-ts/`.
 
+### Reading vs sending from a hosted page
+
+Reading works from any origin, because public data needs no authentication. Sending (and any authenticated write) needs the homeserver session. In the browser, the pubky client relies on the browser to send that session as a cookie, and when the page and the homeserver are on different sites (for example a `github.io` page and a homeserver on another domain) that cookie is a third-party cookie, which Safari, Chrome, and Firefox block. So a cross-origin static host can read conversations but cannot send.
+
+To send from a hosted page, serve the app on the same registrable domain as the homeserver (so the session cookie is first-party, which is how pubky.app works), or use a homeserver that sets partitioned (CHIPS) cookies. For local development you can also allow third-party cookies for the page.
+
 ## API
 
 ### `PrivateMessengerClient`
