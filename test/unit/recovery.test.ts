@@ -72,7 +72,9 @@ describe('fromRecoveryFile (known-answer interop with Rust-created p1/p2.pkarr)'
     expect(c1.publicKeyString()).not.toBe(c2.publicKeyString());
   });
 
-  it('throws on the wrong passphrase', () => {
-    expect(() => PrivateMessengerClient.fromRecoveryFile(fixture('p1.pkarr'), 'wrong')).toThrow();
+  it('throws a clear error on the wrong passphrase', () => {
+    expect(() => PrivateMessengerClient.fromRecoveryFile(fixture('p1.pkarr'), 'wrong')).toThrow(
+      /recovery file/i,
+    );
   });
 });

@@ -53,7 +53,16 @@ export class PrivateMessengerClient {
    * @param passphrase Defaults to an empty string.
    */
   static fromRecoveryFile(recoveryFileBytes: Uint8Array, passphrase = ''): PrivateMessengerClient {
-    const keypair = Keypair.fromRecoveryFile(recoveryFileBytes, passphrase);
+    let keypair: Keypair;
+    try {
+      keypair = Keypair.fromRecoveryFile(recoveryFileBytes, passphrase);
+    } catch (e) {
+      // The underlying WASM surfaces a cryptic `aead::Error` on a bad passphrase.
+      const detail = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Failed to decrypt recovery file: wrong passphrase or corrupt file (${detail})`,
+      );
+    }
     return new PrivateMessengerClient(keypair);
   }
 
