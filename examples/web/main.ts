@@ -54,15 +54,19 @@ function setStatus(text: string, kind: 'info' | 'error' = 'info'): void {
   ui.status.dataset.kind = kind;
 }
 
+// Keep the `method` state and the visible tab/pane in sync so the Connect button
+// always uses the input the user can actually see.
+function setMethod(next: 'phrase' | 'file'): void {
+  method = next;
+  ui.tabs.forEach((t) => t.classList.toggle('active', t.dataset.method === next));
+  ui.panePhrase.hidden = next !== 'phrase';
+  ui.paneFile.hidden = next !== 'file';
+}
+
 // --- setup form wiring ---
 
 ui.tabs.forEach((tab) => {
-  tab.addEventListener('click', () => {
-    method = (tab.dataset.method as 'phrase' | 'file') ?? 'phrase';
-    ui.tabs.forEach((t) => t.classList.toggle('active', t === tab));
-    ui.panePhrase.hidden = method !== 'phrase';
-    ui.paneFile.hidden = method !== 'file';
-  });
+  tab.addEventListener('click', () => setMethod(tab.dataset.method === 'file' ? 'file' : 'phrase'));
 });
 
 ui.file.addEventListener('change', async () => {
@@ -89,11 +93,11 @@ async function loadDemo(who: 'alice' | 'bob'): Promise<void> {
     const fixture = who === 'alice' ? 'p1.pkarr' : 'p2.pkarr';
     const response = await fetch(`./${fixture}`);
     if (!response.ok) throw new Error(`could not load ${fixture}`);
-    fileBytes = new Uint8Array(await response.arrayBuffer());
-    method = 'file';
-    ui.passphrase.value = 'password';
-    ui.peer.value = who === 'alice' ? BOB : ALICE;
-    await connect();
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    // Build the demo client directly; do not touch the manual form state.
+    const demoClient = PrivateMessengerClient.fromRecoveryFile(bytes, 'password');
+    const peerKey = PublicKey.from(who === 'alice' ? BOB : ALICE);
+    await connectClient(demoClient, peerKey);
   } catch (e) {
     setStatus(`Could not load demo identity: ${errorText(e)}`, 'error');
   }
@@ -106,42 +110,51 @@ async function connect(): Promise<void> {
   try {
     setStatus('Deriving your keys...');
     const passphrase = ui.passphrase.value;
+    let newClient: PrivateMessengerClient;
     if (method === 'phrase') {
-      client = PrivateMessengerClient.fromRecoveryPhrase(ui.phrase.value.trim(), passphrase);
+      const phrase = ui.phrase.value.trim();
+      if (!phrase) throw new Error('Enter your recovery phrase.');
+      newClient = PrivateMessengerClient.fromRecoveryPhrase(phrase, passphrase);
     } else {
       if (!fileBytes) throw new Error('Choose a .pkarr recovery file first.');
-      client = PrivateMessengerClient.fromRecoveryFile(fileBytes, passphrase);
+      newClient = PrivateMessengerClient.fromRecoveryFile(fileBytes, passphrase);
     }
 
     const peerValue = ui.peer.value.trim();
     if (!peerValue) throw new Error('Enter a peer public key.');
-    peer = PublicKey.from(peerValue);
-    ownPubky = client.publicKeyString();
-
-    setStatus('Signing in to the homeserver...');
-    await client.signIn();
-
-    ui.me.textContent = shorten(ownPubky);
-    ui.me.title = ownPubky;
-    ui.them.textContent = shorten(peer.z32());
-    ui.them.title = peer.z32();
-    messages = [];
-    seen.clear();
-    ui.messages.replaceChildren();
-    ui.setup.hidden = true;
-    ui.chat.hidden = false;
-    ui.disconnect.hidden = false;
-
-    setStatus('Loading messages...');
-    await refresh();
-    startPolling();
-    setStatus(`Connected. ${messages.length} message(s) in this conversation.`);
-    ui.text.focus();
+    await connectClient(newClient, PublicKey.from(peerValue));
   } catch (e) {
     setStatus(errorText(e), 'error');
   } finally {
     ui.connect.disabled = false;
   }
+}
+
+// Shared sign-in + switch-to-chat logic for both the demo and the manual form.
+async function connectClient(newClient: PrivateMessengerClient, peerKey: PublicKey): Promise<void> {
+  setStatus('Signing in to the homeserver...');
+  await newClient.signIn(); // throws here on failure; module state stays untouched
+
+  client = newClient;
+  peer = peerKey;
+  ownPubky = client.publicKeyString();
+
+  ui.me.textContent = shorten(ownPubky);
+  ui.me.title = ownPubky;
+  ui.them.textContent = shorten(peerKey.z32());
+  ui.them.title = peerKey.z32();
+  messages = [];
+  seen.clear();
+  ui.messages.replaceChildren();
+  ui.setup.hidden = true;
+  ui.chat.hidden = false;
+  ui.disconnect.hidden = false;
+
+  setStatus('Loading messages...');
+  await refresh();
+  startPolling();
+  setStatus(`Connected. ${messages.length} message(s) in this conversation.`);
+  ui.text.focus();
 }
 
 async function refresh(): Promise<void> {
@@ -235,7 +248,13 @@ function disconnect(): void {
   ownPubky = '';
   messages = [];
   seen.clear();
+  fileBytes = null;
   ui.messages.replaceChildren();
+  // Clear sensitive inputs and reset the form to a known-good default.
+  ui.phrase.value = '';
+  ui.passphrase.value = '';
+  ui.file.value = '';
+  setMethod('phrase');
   ui.chat.hidden = true;
   ui.disconnect.hidden = true;
   ui.setup.hidden = false;
