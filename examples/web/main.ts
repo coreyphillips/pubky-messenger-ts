@@ -2,7 +2,12 @@
 //
 // In a real app you would `import { PrivateMessengerClient } from 'pubky-messenger-ts'`.
 // Here we import the local source directly so the example builds inside this repo.
-import { PrivateMessengerClient, PublicKey, type DecryptedMessage } from '../../src/index.js';
+import {
+  FetchFailureError,
+  PrivateMessengerClient,
+  PublicKey,
+  type DecryptedMessage,
+} from '../../src/index.js';
 
 // Public keys of the bundled test identities (test/fixtures/p1.pkarr, p2.pkarr).
 const ALICE = 'w5ux3c55ujxq7rpb6x9z9wo554s4eb4zeuh1933b94zk7qsfxd1o';
@@ -225,14 +230,13 @@ async function send(): Promise<void> {
     ]);
   } catch (e) {
     ui.text.value = text;
-    const detail = errorText(e);
-    if (/session|cookie|401|unauthor/i.test(detail)) {
+    if (e instanceof FetchFailureError && e.failure.reason.kind === 'authentication') {
       setStatus(
-        'Send failed: your browser is blocking the homeserver session cookie because this page and the homeserver are on different sites. Reading works, but sending needs same-origin hosting or third-party cookies enabled (see the README).',
+        `Send failed: the homeserver did not accept a session for this identity (status ${e.failure.reason.status}). Reading works without one; sending needs an account on the homeserver.`,
         'error',
       );
     } else {
-      setStatus(`Send failed: ${detail}`, 'error');
+      setStatus(`Send failed: ${errorText(e)}`, 'error');
     }
   }
 }
