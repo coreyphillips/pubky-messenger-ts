@@ -12,6 +12,7 @@ import {
 import { ConversationKey } from './crypto.js';
 import { FetchFailureError, Requests, type EngineContext } from './engine.js';
 import { PrivateMessage, parsePrivateMessageJson, unixSeconds } from './message.js';
+import { parseV2MessageJson } from './v2/message.js';
 import { parseZ32PublicKey } from './z32.js';
 
 /**
@@ -24,6 +25,8 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$
 
 /** Envelope version of a v1 prepared message. */
 export const PREPARED_V1 = 1;
+/** Envelope version of a protocol v2 prepared message. */
+export const PREPARED_V2 = 2;
 
 /** JSON shape of a `PreparedMessage`, the same as the Rust crate's serde output. */
 export interface PreparedMessageJson {
@@ -107,20 +110,32 @@ export class PreparedMessage {
    * Call this before using restored IDs or participants for cleanup or other side effects.
    * Publication additionally checks the local owner and decrypts and verifies the message.
    * Throws on any problem.
+   *
+   * A version 1 envelope is signed by the owner's identity key and is fully authenticated here.
+   * A version 2 envelope is signed by the owner's messaging key, which is not in the envelope:
+   * pass it as `messagingKey` (bare z-base-32) to authenticate the binding; without it only the
+   * structure is checked. `MessengerV2Client.publishMessage` always authenticates.
    */
-  validate(): void {
-    if (this.fields.version !== PREPARED_V1) {
+  validate(options: { messagingKey?: string } = {}): void {
+    const version = this.fields.version;
+    if (version !== PREPARED_V1 && version !== PREPARED_V2) {
       throw new Error('Unsupported prepared message version');
     }
     const owner = this.validateEnvelope();
-    this.verifyBinding(owner);
-    let message: unknown;
+    if (version === PREPARED_V1) {
+      this.verifyBinding(owner);
+    } else if (options.messagingKey !== undefined) {
+      this.verifyBinding(parseZ32PublicKey(options.messagingKey, 'messaging key'));
+    }
+    let message: { signature_bytes: number[] };
     try {
-      message = parsePrivateMessageJson(JSON.parse(decodeUtf8Strict(this.fields.payload)));
+      const value: unknown = JSON.parse(decodeUtf8Strict(this.fields.payload));
+      message =
+        version === PREPARED_V1 ? parsePrivateMessageJson(value) : parseV2MessageJson(value);
     } catch {
       throw new Error('Invalid prepared payload');
     }
-    if ((message as { signature_bytes: number[] }).signature_bytes.length !== 64) {
+    if (message.signature_bytes.length !== 64) {
       throw new Error('Invalid prepared message signature length');
     }
   }
@@ -267,6 +282,9 @@ export function v1Destination(
   secretKey: Uint8Array,
   owner: string,
 ): string {
+  if (prepared.version() !== PREPARED_V1) {
+    throw new Error('Unsupported prepared message version');
+  }
   prepared.validate();
   if (prepared.owner() !== owner) {
     throw new Error('Prepared message belongs to another identity');

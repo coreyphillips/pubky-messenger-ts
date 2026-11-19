@@ -89,7 +89,9 @@ export type FailureReason =
   /** A listing held more than `maxListingEntries` entries. */
   | { kind: 'listingTooLong' }
   /** The URL is not a file directly inside its publisher's copy of the conversation, so it was not requested. */
-  | { kind: 'outsideConversation' };
+  | { kind: 'outsideConversation' }
+  /** Protocol v2: the decrypted sender is not the owner of the directory the message was listed from. */
+  | { kind: 'senderMismatch' };
 
 /** A directory listing or message request that did not complete successfully. */
 export interface FetchFailure {
@@ -116,7 +118,9 @@ export function describeFetchFailure(failure: FetchFailure): string {
               ? 'listing did not advance'
               : r.kind === 'listingTooLong'
                 ? 'listing exceeded maxListingEntries'
-                : 'not a message in this conversation, not requested';
+                : r.kind === 'outsideConversation'
+                  ? 'not a message in this conversation, not requested'
+                  : 'sender is not the owner of the directory it was listed from';
   const attempts = failure.attempts > 0 ? ` after ${failure.attempts} attempt(s)` : '';
   return `${failure.url}: ${reason}${attempts}`;
 }
