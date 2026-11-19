@@ -4,34 +4,44 @@ import { randomBytes } from '@noble/hashes/utils.js';
 /**
  * XSalsa20-Poly1305 (NaCl `secretbox`) authenticated encryption.
  *
- * This mirrors `pubky_common::crypto::{encrypt, decrypt}` byte-for-byte so that
- * messages are wire-compatible with the Rust `pubky-messenger` implementation:
- *   - a fresh random 24-byte nonce is generated per message and prepended to the
- *     ciphertext (`[nonce(24)][ciphertext + 16-byte Poly1305 tag]`);
+ * This mirrors `pubky_common::crypto::{encrypt, decrypt}` byte for byte so that messages are
+ * wire-compatible with the Rust `pubky-messenger` implementation:
+ *   - a fresh random 24-byte nonce is generated per field and prepended:
+ *     `nonce(24) || tag(16) || ciphertext`;
  *   - empty plaintext encrypts to empty output (and decrypts back to empty);
- *   - inputs shorter than the nonce length are rejected.
- *
- * Note: the Rust docs (README / architecture.md) claim ChaCha20-Poly1305, but the
- * actual `pubky-common` cipher is XSalsa20-Poly1305, verified against source.
+ *   - inputs shorter than the nonce are rejected.
  */
 
-const NONCE_LENGTH = 24;
+export const NONCE_LENGTH = 24;
 
-/** Encrypt `plaintext` with a 32-byte key. Returns `nonce || ciphertext`. */
+/** Encrypt `plaintext` with a 32-byte key. Returns `nonce || tag || ciphertext`. */
 export function encrypt(plaintext: Uint8Array, key: Uint8Array): Uint8Array {
+  return encryptWithNonce(plaintext, key, randomBytes(NONCE_LENGTH));
+}
+
+/**
+ * Encrypt with a caller-chosen nonce. Only for reproducing known vectors in tests: reusing a
+ * nonce with the same key breaks confidentiality.
+ */
+export function encryptWithNonce(
+  plaintext: Uint8Array,
+  key: Uint8Array,
+  nonce: Uint8Array,
+): Uint8Array {
   if (plaintext.length === 0) {
     return new Uint8Array(0);
   }
-  const nonce = randomBytes(NONCE_LENGTH);
+  if (nonce.length !== NONCE_LENGTH) {
+    throw new Error(`Nonce must be ${NONCE_LENGTH} bytes`);
+  }
   const ciphertext = xsalsa20poly1305(key, nonce).encrypt(plaintext);
-
   const out = new Uint8Array(nonce.length + ciphertext.length);
   out.set(nonce, 0);
   out.set(ciphertext, nonce.length);
   return out;
 }
 
-/** Decrypt `nonce || ciphertext` with a 32-byte key. Throws on failure. */
+/** Decrypt `nonce || tag || ciphertext` with a 32-byte key. Throws on failure. */
 export function decrypt(bytes: Uint8Array, key: Uint8Array): Uint8Array {
   if (bytes.length === 0) {
     return new Uint8Array(0);
