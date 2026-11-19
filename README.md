@@ -2,7 +2,7 @@
 
 End-to-end encrypted, one-to-one private messaging over the [Pubky](https://github.com/pubky) network.
 
-This is a **TypeScript port** of the Rust [`pubky-messenger`](https://github.com/coreyphillips/pubky-messenger) crate 0.5.0, built on the official [`@synonymdev/pubky`](https://www.npmjs.com/package/@synonymdev/pubky) client. It is **wire-compatible** with the Rust implementation: messages encrypted and signed by one can be read and verified by the other. A known-answer fixture written by the Rust crate (0.3.0) is decrypted, re-signed and re-encrypted byte for byte in the unit tests.
+This is a **TypeScript port** of the Rust [`pubky-messenger`](https://github.com/coreyphillips/pubky-messenger) crate 0.5.0 (protocol v1), built on the official [`@synonymdev/pubky`](https://www.npmjs.com/package/@synonymdev/pubky) client, plus [protocol v2](PROTOCOL-v2.md) messaging keys for apps that sign in with Pubky grants and never see the identity secret. Protocol v1 is **wire-compatible** with the Rust implementation: messages encrypted and signed by one can be read and verified by the other. A known-answer fixture written by the Rust crate (0.3.0) is decrypted, re-signed and re-encrypted byte for byte in the unit tests.
 
 ## Features
 
@@ -17,6 +17,7 @@ This is a **TypeScript port** of the Rust [`pubky-messenger`](https://github.com
 - Pluggable storage (`MessengerStorage`), with a default adapter over `@synonymdev/pubky`
 - Request counters (`requestStats`)
 - Profile and follow helpers over the `pubky.app` schema
+- Protocol v2 (`MessengerV2Client`): messaging keys derived from a grant's scoped encryption key, published key records, conversation discovery
 - ESM + CommonJS + type declarations; runs in Node 18+ and in browsers (via the pubky WASM). No Node-only APIs in the library.
 
 ## Installation
@@ -213,6 +214,80 @@ Errors should carry an HTTP status so the engine can classify them. Throw `new S
 
 `createPubkyStorage(pubky, session?)` is the default adapter: `pubky.publicStorage` for reads and listings, `session.storage` for writes and deletes, and `pubky.client.fetch` (without following redirects) for `getConditional`. SDK calls take no `AbortSignal`, so on abort the adapter stops waiting but the request may still complete. Pass it, or your own adapter, as `new PrivateMessengerClient(keypair, { storage })`.
 
+## Protocol v2: messaging keys
+
+Protocol v1 derives every conversation key from the identity secrets, so an app that signs in through a Pubky grant (for example approved in Pubky Ring) cannot use it. [Protocol v2](PROTOCOL-v2.md) derives a separate messaging keypair from a scoped key the signer delivers with the grant, and publishes its public half in a key record. Every device approved for the same scope derives the same messaging key. v2 conversations live under `/pub/private_messages/v2/` and never collide with v1 ones.
+
+### Getting the messaging seed
+
+Request `MESSAGING_CAPABILITIES` (`/pub/private_messages/:rw,/priv/private_messages/v2/messaging-key:e`) with a signed approval, then derive the seed from the grant's encryption keys:
+
+```ts
+import {
+  AuthFlowKind,
+  MESSAGING_CAPABILITIES,
+  MESSAGING_KEY_PATH,
+  MessagingIdentity,
+  MessengerV2Client,
+  Pubky,
+  ReceiveState,
+  createPubkyStorage,
+  messageUuid,
+} from 'pubky-messenger-ts';
+
+const pubky = new Pubky();
+const flow = await pubky.startGrantAuthFlow(MESSAGING_CAPABILITIES, AuthFlowKind.signin(), {
+  clientId: 'my-app.example',
+  approvalFormat: 'signedApprovalV1',
+});
+showQr(flow.authorizationUrl);
+const session = await flow.awaitApproval();
+
+const keys = session.grant!.encryptionKeys!;
+const seed = keys.deriveForPath(MESSAGING_KEY_PATH);
+keys.free();
+const identity = MessagingIdentity.fromSeed(seed); // copies the seed
+seed.fill(0);
+```
+
+A holder of the identity secret derives the same seed locally with `deriveMessagingSeed(keypair.secret())` or `MessagingIdentity.fromIdentitySecret(keypair.secret())`. The derivation follows pubky-common 0.17.1 hierarchical keys v1 and is pinned by the spec's test vectors. `identity.dispose()` zeroes the secret.
+
+### Messaging
+
+```ts
+const owner = session.info.publicKey.z32();
+const client = new MessengerV2Client({
+  owner,
+  identity,
+  storage: createPubkyStorage(pubky, session),
+});
+
+await client.publishKeyRecord(); // once per identity; republishing is idempotent
+
+const peer = 'ssffc7wiswjzdtt7nw93fa9wy9bus34puyy39giityofcibh9qny';
+if (await client.fetchKeyRecord(peer)) {
+  const prepared = await client.prepareMessage(peer, 'hello over v2');
+  await outbox.put(prepared.toJSON()); // durable, JSON-serializable
+  await client.publishMessage(prepared); // returns the message UUID
+
+  const state = new ReceiveState();
+  const received = await client.receiveNewMessages(peer, state);
+  for (const item of received.messages) {
+    if (item.message) show(messageUuid(item.id), item.message);
+    state.acknowledge(item);
+  }
+}
+
+// Which of my contacts have written to me?
+const { active, withoutKey, failures } = await client.discoverConversations(followsAndFollowers);
+```
+
+- Peers and owners are bare 52-character z-base-32 keys; anything else is rejected.
+- `fetchKeyRecord(peer)` returns null when the peer has no record (404: v2 not enabled) and throws `InvalidKeyRecordError` for a record that does not verify. Valid records are cached in memory; pass `{ refresh: true }` to refetch. Conversation methods throw `MessagingNotEnabledError` for a peer without a record.
+- A message whose decrypted sender is not the owner of the directory it was listed from is reported as a `senderMismatch` failure, never as a message. A signature that does not verify yields `verified: false`. Bodies that are not v2 messages are skipped (or returned without a message by incremental receive, so they can be acknowledged).
+- v2 prepared messages use envelope version 2, signed with the messaging key. `prepared.validate({ messagingKey })` authenticates a restored envelope; `publishMessage` always does, before any request.
+- The engine, incremental receive, prepared publication, cleanup and `FetchConfig` are shared with v1: same pagination, entry filter, limits, retries and reports.
+
 ## Try it: interactive chat
 
 An interactive terminal chat, a port of the Rust `conversation.rs` example, lives in [`examples/chat.ts`](examples/chat.ts).
@@ -296,7 +371,7 @@ Sessions are grants that authenticate each request with a bearer token in the `A
 - `DecryptedMessage { sender: string; content: string; timestamp: number; verified: boolean }` (sender is bare z-base-32, timestamp Unix seconds)
 - `MessageFetch { messages; failures }`, `MessageDeletion { deleted; failures }`
 - `FetchFailure { url; attempts; reason: FailureReason }`; `describeFetchFailure(failure)`; `FetchFailureError`
-- `FailureReason`: `status`, `authentication`, `timedOut`, `transport`, `listingStalled`, `listingTooLong`, `outsideConversation` (by `kind`)
+- `FailureReason`: `status`, `authentication`, `timedOut`, `transport`, `listingStalled`, `listingTooLong`, `outsideConversation`, `senderMismatch` (v2) (by `kind`)
 - `FetchConfig`, `DEFAULT_FETCH_CONFIG`, `resolveFetchConfig(partial)`
 - `ReceiveState` (`acknowledge`, `isAcknowledged`, `acknowledgedIds`, `lastListingComplete`, `lastListedPublishers`, `size`, `isEmpty`, `toJSON`, `fromJSON`), `ChangePolicy`
 - `MessageId { publisher; url }`, `messageUuid(id | url)`, `PendingMessage`, `ReceivedMessage`, `ReceivedMessages`, `Discovery`
@@ -304,9 +379,30 @@ Sessions are grants that authenticate each request with a bearer token in the `A
 - `RequestStats`, `RequestCounts`
 - `MessengerStorage`, `ConditionalGetResult`, `StorageError`, `createPubkyStorage(pubky, session?)`, `storageErrorInfo(error)`, `parseRetryAfter(header)`
 - `PrivateMessage` (the lower-level v1 message), `ConversationKey`, `generateSharedSecret`, `generateConversationPath`
-- Re-exported from `@synonymdev/pubky`: `Keypair`, `PublicKey`, `Pubky`, `Session`; and `englishWordlist`
 
-## How it works
+### Protocol v2
+
+- `new MessengerV2Client({ owner, identity, storage, fetchConfig?, now? })` (`now` returns Unix milliseconds; defaults to `Date.now`)
+  - `owner(): string`, `messagingKey(): string`
+  - `publishKeyRecord(): Promise<KeyRecord>`
+  - `fetchKeyRecord(peer: string, opts?: { refresh?: boolean; signal?: AbortSignal }): Promise<KeyRecord | null>`
+  - `prepareMessage(peer: string, content: string): Promise<PreparedMessage>`
+  - `publishMessage(prepared: PreparedMessage): Promise<string>`
+  - `sendMessage(peer: string, content: string): Promise<string>`
+  - `fetchMessages(peer: string): Promise<MessageFetch>`
+  - `receiveNewMessages(peer: string, state: ReceiveState): Promise<ReceivedMessages>`
+  - `discoverMessages(peer: string, state: ReceiveState): Promise<Discovery>`, `retrieveMessages(peer: string, pending): Promise<ReceivedMessages>`
+  - `deleteMessagesWithReport(ids: string[], peer: string): Promise<MessageDeletion>`
+  - `clearMessagesWithReport(peer: string): Promise<MessageDeletion>`
+  - `discoverConversations(peers: string[], opts?: { signal?: AbortSignal }): Promise<{ active: string[]; withoutKey: string[]; failures: Array<{ peer: string; error: string }> }>`
+  - `requestStats(): RequestStats`
+  - every network method also takes `{ signal?: AbortSignal }`
+- `MessagingIdentity` (`fromSeed(seed)`, `fromIdentitySecret(secret)`, `publicKeyZ32()`, `publicKeyBytes()`, `disposed`, `dispose()`)
+- `deriveMessagingSeed(identitySecret)`, `MESSAGING_KEY_PATH`, `KEY_RECORD_PATH`, `MESSAGING_CAPABILITIES`, `V2_CONVERSATIONS_PATH`
+- `KeyRecord { version: 2; owner; messagingKey; createdAt }` (`createdAt` in Unix microseconds), `KeyRecordJson`, `parseKeyRecord(body, owner)`, `InvalidKeyRecordError`, `MessagingNotEnabledError`
+- Re-exported from `@synonymdev/pubky`: `Keypair`, `PublicKey`, `Pubky`, `AuthFlowKind`, `Session`; and `englishWordlist`
+
+## How it works (protocol v1)
 
 Each message is stored as JSON at a deterministic, per-conversation path under the **sender's** own storage:
 
@@ -320,6 +416,8 @@ pubky://<sender>/pub/private_messages/<conversationId>/<uuid>.json
 - **Authentication**: each message is Ed25519-signed over `blake3(content || sender_pubkey || timestamp_be)`.
 - **Format**: compact JSON `{"timestamp":..,"encrypted_sender":[..],"encrypted_content":[..],"signature_bytes":[..]}`, byte arrays as arrays of integers, keys in that order.
 
+Protocol v2 keeps the cipher and format conventions but keys conversations with the messaging keys, stores them under `/pub/private_messages/v2/<cid>/`, adds `"version":2` to each message and signs a digest that also binds the recipient. [PROTOCOL-v2.md](PROTOCOL-v2.md) is the specification.
+
 ## Testing
 
 ```sh
@@ -329,11 +427,11 @@ npm run typecheck        # tsc --noEmit
 npm run build            # ESM + CJS + d.ts via tsup
 ```
 
-The unit tests pin the 0.3.0 fixture (conversation path, decryption from both sides, exact signatures, ciphertexts and body bytes, small-order rejection) and port the Rust crate's engine tests onto an in-memory `MessengerStorage`: concurrency limits, deadlines, retries and Retry-After, pagination and its limits, the listing filter, incremental receive, prepared publication and cleanup reports. The integration tests (gated behind `PUBKY_MESSENGER_LIVE`) use the bundled `test/fixtures/p1.pkarr` and `p2.pkarr` identities, which live on the staging homeserver `ufibwbmed6jeq9k4p583go95wofakh9fwpp4k734trq79pd9u1uy`.
+The unit tests pin the 0.3.0 fixture (conversation path, decryption from both sides, exact signatures, ciphertexts and body bytes, small-order rejection) and port the Rust crate's engine tests onto an in-memory `MessengerStorage`: concurrency limits, deadlines, retries and Retry-After, pagination and its limits, the listing filter, incremental receive, prepared publication and cleanup reports. The v2 tests pin the spec's seed vectors and cover key records, tampering, both directions end to end over the in-memory storage, sender checks and protocol separation. The integration tests (gated behind `PUBKY_MESSENGER_LIVE`) use the bundled `test/fixtures/p1.pkarr` and `p2.pkarr` identities, which live on the staging homeserver `ufibwbmed6jeq9k4p583go95wofakh9fwpp4k734trq79pd9u1uy`. The live v2 test obtains real grant sessions for both through the staging relay, checks the grant's seed against local derivation, messages both ways and cleans up its messages (the key records stay published).
 
 ## Relationship to the Rust crate
 
-|                             | Rust `pubky-messenger` 0.5.0 | `pubky-messenger-ts` 0.5.0                                |
+|                             | Rust `pubky-messenger` 0.5.0 | `pubky-messenger-ts` 0.6.0                                |
 | --------------------------- | ---------------------------- | --------------------------------------------------------- |
 | Network client              | `pubky` 0.16.2               | `@synonymdev/pubky` 0.17.x (WASM), peer dependency        |
 | Storage I/O                 | its own HTTP transport       | `MessengerStorage` adapter (default over the SDK)         |
@@ -342,6 +440,7 @@ The unit tests pin the 0.3.0 fixture (conversation path, decryption from both si
 | Cancellation                | dropping the future          | `AbortSignal`                                             |
 | Method names                | `snake_case`                 | `camelCase`                                               |
 | Cipher / signatures / paths | same                         | identical (wire-compatible)                               |
+| Protocol v2                 | not implemented              | `MessengerV2Client`                                       |
 
 The TS port does not reimplement the Rust transport's same-origin redirect policy for every request: reads and listings go through the SDK, and only `getConditional` refuses redirects.
 
