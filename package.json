@@ -1,7 +1,7 @@
 {
   "name": "pubky-messenger-ts",
   "version": "0.1.0",
-  "description": "TypeScript library for end-to-end encrypted private messaging over the Pubky network. A faithful port of the pubky-messenger Rust crate, built on @synonymdev/pubky.",
+  "description": "TypeScript library for end-to-end encrypted private messaging over the Pubky network. A port of the pubky-messenger Rust crate 0.5.0, built on @synonymdev/pubky.",
   "license": "MIT",
   "author": "Corey Phillips",
   "type": "module",
@@ -17,7 +17,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "PROTOCOL-v2.md"
   ],
   "engines": {
     "node": ">=18"
@@ -25,6 +26,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
+    "prepare": "tsup",
     "chat": "tsx examples/chat.ts",
     "web:dev": "vite",
     "web:build": "vite build",
@@ -45,14 +47,17 @@
     "chat",
     "e2ee"
   ],
+  "peerDependencies": {
+    "@synonymdev/pubky": ">=0.17.1 <0.19"
+  },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
-    "@scure/bip39": "^2.2.0",
-    "@synonymdev/pubky": "^0.9.3"
+    "@scure/bip39": "^2.2.0"
   },
   "devDependencies": {
+    "@synonymdev/pubky": "0.17.1",
     "@types/node": "^26.1.0",
     "prettier": "^3.9.4",
     "tsup": "^8.5.1",
